@@ -1693,6 +1693,7 @@ static int swrm_get_logical_dev_num(struct swr_master *mstr, u64 dev_id,
 	if (ret)
 		dev_err(swrm->dev, "%s: device 0x%llx is not ready\n",
 			__func__, dev_id);
+
 	swrm_new_slave_config(swrm);
 	pm_runtime_mark_last_busy(swrm->dev);
 	pm_runtime_put_autosuspend(swrm->dev);
@@ -2258,6 +2259,7 @@ static int swrm_runtime_suspend(struct device *dev)
 	struct swr_master *mstr = &swrm->master;
 	struct swr_device *swr_dev;
 	int current_state = 0;
+	struct irq_data *irq_data = NULL;
 
 	dev_dbg(dev, "%s: pm_runtime: suspend state: %d\n",
 		__func__, swrm->state);
@@ -2297,7 +2299,9 @@ static int swrm_runtime_suspend(struct device *dev)
 
 		if (swrm->clk_stop_mode0_supp) {
 			if (swrm->wake_irq > 0) {
-				enable_irq(swrm->wake_irq);
+				irq_data = irq_get_irq_data(swrm->wake_irq);
+				if (irq_data && irqd_irq_disabled(irq_data))
+					enable_irq(swrm->wake_irq);
 			} else if (swrm->ipc_wakeup) {
 				msm_aud_evt_blocking_notifier_call_chain(
 					SWR_WAKE_IRQ_REGISTER, (void *)swrm);
@@ -2340,9 +2344,11 @@ static int swrm_device_down(struct device *dev)
 	struct swr_mstr_ctrl *swrm = platform_get_drvdata(pdev);
 
 	dev_dbg(dev, "%s: swrm state: %d\n", __func__, swrm->state);
+
 	mutex_lock(&swrm->force_down_lock);
 	swrm->state = SWR_MSTR_SSR;
 	mutex_unlock(&swrm->force_down_lock);
+
 	swrm_device_suspend(dev);
 	return 0;
 }

@@ -8,6 +8,51 @@
 #include <linux/list.h>
 #include <linux/refcount.h>
 
+#define TRACE_CGROUP_PATH_LEN 1024
+extern spinlock_t trace_cgroup_path_lock;
+extern char trace_cgroup_path[TRACE_CGROUP_PATH_LEN];
+
+/*
+ * cgroup_path() takes a spin lock. It is good practice not to take
+ * spin locks within trace point handlers, as they are mostly hidden
+ * from normal view. As cgroup_path() can take the kernfs_rename_lock
+ * spin lock, it is best to not call that function from the trace event
+ * handler.
+ *
+ * Note: trace_cgroup_##type##_enabled() is a static branch that will only
+ *       be set when the trace event is enabled.
+ */
+#define TRACE_CGROUP_PATH(type, cgrp, ...)				\
+	do {								\
+		if (trace_cgroup_##type##_enabled()) {			\
+			spin_lock(&trace_cgroup_path_lock);		\
+			cgroup_path(cgrp, trace_cgroup_path,		\
+				    TRACE_CGROUP_PATH_LEN);		\
+			trace_cgroup_##type(cgrp, trace_cgroup_path,	\
+					    ##__VA_ARGS__);		\
+			spin_unlock(&trace_cgroup_path_lock);		\
+		}							\
+	} while (0)
+
+struct cgroup_pidlist;
+
+struct cgroup_file_ctx {
+	struct cgroup_namespace	*ns;
+
+	struct {
+		void			*trigger;
+	} psi;
+
+	struct {
+		bool			started;
+		struct css_task_iter	iter;
+	} procs;
+
+	struct {
+		struct cgroup_pidlist	*pidlist;
+	} procs1;
+};
+
 /*
  * A cgroup can be associated with multiple css_sets as different tasks may
  * belong to different cgroups on different hierarchies.  In the other
@@ -103,7 +148,6 @@ extern struct mutex cgroup_mutex;
 extern spinlock_t css_set_lock;
 extern struct cgroup_subsys *cgroup_subsys[];
 extern struct list_head cgroup_roots;
-extern struct file_system_type cgroup_fs_type;
 
 /* iterate across the hierarchies */
 #define for_each_root(root)						\
@@ -198,6 +242,7 @@ int cgroup_rmdir(struct kernfs_node *kn);
 int cgroup_show_path(struct seq_file *sf, struct kernfs_node *kf_node,
 		     struct kernfs_root *kf_root);
 
+int __cgroup_task_count(const struct cgroup *cgrp);
 int cgroup_task_count(const struct cgroup *cgrp);
 
 /*

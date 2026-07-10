@@ -25,7 +25,6 @@ Table : Subdirectories in /proc/sys/net
  ethernet  Ethernet protocol   rose       X.25 PLP layer
  ipv4      IP version 4        x25        X.25 protocol
  ipx       IPX                 token-ring IBM token ring
- bridge    Bridging            decnet     DEC net
  ipv6      IP version 6        tipc       TIPC
 ..............................................................................
 
@@ -45,6 +44,7 @@ through bpf(2) and passing a verifier in the kernel, a JIT will then
 translate these BPF proglets into native CPU instructions. There are
 two flavors of JITs, the newer eBPF JIT currently supported on:
   - x86_64
+  - x86_32
   - arm64
   - arm32
   - ppc64

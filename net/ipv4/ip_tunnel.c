@@ -609,10 +609,10 @@ void ip_md_tunnel_xmit(struct sk_buff *skb, struct net_device *dev, u8 proto)
 	else if (skb->protocol == htons(ETH_P_IP))
 		df = inner_iph->frag_off & htons(IP_DF);
 	headroom += LL_RESERVED_SPACE(rt->dst.dev) + rt->dst.header_len;
-	if (headroom > dev->needed_headroom)
-		dev->needed_headroom = headroom;
+	if (headroom > READ_ONCE(dev->needed_headroom))
+		WRITE_ONCE(dev->needed_headroom, headroom);
 
-	if (skb_cow_head(skb, dev->needed_headroom)) {
+	if (skb_cow_head(skb, READ_ONCE(dev->needed_headroom))) {
 		ip_rt_put(rt);
 		goto tx_dropped;
 	}
@@ -633,7 +633,6 @@ void ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev,
 		    const struct iphdr *tnl_params, u8 protocol)
 {
 	struct ip_tunnel *tunnel = netdev_priv(dev);
-	unsigned int inner_nhdr_len = 0;
 	const struct iphdr *inner_iph;
 	struct flowi4 fl4;
 	u8     tos, ttl;
@@ -642,14 +641,6 @@ void ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev,
 	unsigned int max_headroom;	/* The extra header space needed */
 	__be32 dst;
 	bool connected;
-
-	/* ensure we can access the inner net header, for several users below */
-	if (skb->protocol == htons(ETH_P_IP))
-		inner_nhdr_len = sizeof(struct iphdr);
-	else if (skb->protocol == htons(ETH_P_IPV6))
-		inner_nhdr_len = sizeof(struct ipv6hdr);
-	if (unlikely(!pskb_may_pull(skb, inner_nhdr_len)))
-		goto tx_error;
 
 	inner_iph = (const struct iphdr *)skb_inner_network_header(skb);
 	connected = (tunnel->parms.iph.daddr != 0);
@@ -752,7 +743,11 @@ void ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev,
 		goto tx_error;
 	}
 
-	if (tnl_update_pmtu(dev, skb, rt, tnl_params->frag_off, inner_iph)) {
+	df = tnl_params->frag_off;
+	if (skb->protocol == htons(ETH_P_IP) && !tunnel->ignore_df)
+		df |= (inner_iph->frag_off & htons(IP_DF));
+
+	if (tnl_update_pmtu(dev, skb, rt, df, inner_iph)) {
 		ip_rt_put(rt);
 		goto tx_error;
 	}
@@ -780,16 +775,12 @@ void ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev,
 			ttl = ip4_dst_hoplimit(&rt->dst);
 	}
 
-	df = tnl_params->frag_off;
-	if (skb->protocol == htons(ETH_P_IP) && !tunnel->ignore_df)
-		df |= (inner_iph->frag_off&htons(IP_DF));
-
 	max_headroom = LL_RESERVED_SPACE(rt->dst.dev) + sizeof(struct iphdr)
 			+ rt->dst.header_len + ip_encap_hlen(&tunnel->encap);
-	if (max_headroom > dev->needed_headroom)
-		dev->needed_headroom = max_headroom;
+	if (max_headroom > READ_ONCE(dev->needed_headroom))
+		WRITE_ONCE(dev->needed_headroom, max_headroom);
 
-	if (skb_cow_head(skb, dev->needed_headroom)) {
+	if (skb_cow_head(skb, READ_ONCE(dev->needed_headroom))) {
 		ip_rt_put(rt);
 		dev->stats.tx_dropped++;
 		kfree_skb(skb);
@@ -845,7 +836,7 @@ static void ip_tunnel_update(struct ip_tunnel_net *itn,
 	netdev_state_change(dev);
 }
 
-int ip_tunnel_ioctl(struct net_device *dev, struct ip_tunnel_parm *p, int cmd)
+int ip_tunnel_ctl(struct net_device *dev, struct ip_tunnel_parm *p, int cmd)
 {
 	int err = 0;
 	struct ip_tunnel *t = netdev_priv(dev);
@@ -944,6 +935,20 @@ int ip_tunnel_ioctl(struct net_device *dev, struct ip_tunnel_parm *p, int cmd)
 	}
 
 done:
+	return err;
+}
+EXPORT_SYMBOL_GPL(ip_tunnel_ctl);
+
+int ip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+{
+	struct ip_tunnel_parm p;
+	int err;
+
+	if (copy_from_user(&p, ifr->ifr_ifru.ifru_data, sizeof(p)))
+		return -EFAULT;
+	err = dev->netdev_ops->ndo_tunnel_ctl(dev, &p, cmd);
+	if (!err && copy_to_user(ifr->ifr_ifru.ifru_data, &p, sizeof(p)))
+		return -EFAULT;
 	return err;
 }
 EXPORT_SYMBOL_GPL(ip_tunnel_ioctl);

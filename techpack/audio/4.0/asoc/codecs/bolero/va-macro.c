@@ -2494,28 +2494,28 @@ static const struct soc_enum dec_mode_mux_enum =
 			    dec_mode_mux_text);
 
 static const struct snd_kcontrol_new va_macro_snd_controls[] = {
-	SOC_SINGLE_SX_TLV("VA_DEC0 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC0 Volume",
 			  BOLERO_CDC_VA_TX0_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC1 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC1 Volume",
 			  BOLERO_CDC_VA_TX1_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC2 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC2 Volume",
 			  BOLERO_CDC_VA_TX2_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC3 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC3 Volume",
 			  BOLERO_CDC_VA_TX3_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC4 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC4 Volume",
 			  BOLERO_CDC_VA_TX4_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC5 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC5 Volume",
 			  BOLERO_CDC_VA_TX5_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC6 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC6 Volume",
 			  BOLERO_CDC_VA_TX6_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC7 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC7 Volume",
 			  BOLERO_CDC_VA_TX7_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
 	SOC_SINGLE_EXT("LPI Enable", 0, 0, 1, 0,
@@ -2535,10 +2535,10 @@ static const struct snd_kcontrol_new va_macro_snd_controls[] = {
 };
 
 static const struct snd_kcontrol_new va_macro_snd_controls_common[] = {
-	SOC_SINGLE_SX_TLV("VA_DEC0 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC0 Volume",
 			  BOLERO_CDC_VA_TX0_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC1 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC1 Volume",
 			  BOLERO_CDC_VA_TX1_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
 	SOC_SINGLE_EXT("LPI Enable", 0, 0, 1, 0,
@@ -2546,10 +2546,10 @@ static const struct snd_kcontrol_new va_macro_snd_controls_common[] = {
 };
 
 static const struct snd_kcontrol_new va_macro_snd_controls_v3[] = {
-	SOC_SINGLE_SX_TLV("VA_DEC2 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC2 Volume",
 			  BOLERO_CDC_VA_TX2_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("VA_DEC3 Volume",
+	SOC_SINGLE_S8_TLV("VA_DEC3 Volume",
 			  BOLERO_CDC_VA_TX3_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
 	SOC_SINGLE_EXT("LPI Enable", 0, 0, 1, 0,

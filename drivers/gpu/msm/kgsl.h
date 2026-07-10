@@ -1,4 +1,5 @@
 /* Copyright (c) 2008-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -82,6 +83,11 @@
 #define SCRATCH_RPTR_OFFSET(id) ((id) * sizeof(unsigned int))
 #define SCRATCH_RPTR_GPU_ADDR(dev, id) \
 	((dev)->scratch.gpuaddr + SCRATCH_RPTR_OFFSET(id))
+
+/* OFFSET to KMD postamble packets in scratch buffer */
+#define SCRATCH_POSTAMBLE_OFFSET (100 * sizeof(u64))
+#define SCRATCH_POSTAMBLE_ADDR(dev) \
+	((dev)->scratch.gpuaddr + SCRATCH_POSTAMBLE_OFFSET)
 
 /* Timestamp window used to detect rollovers (half of integer range) */
 #define KGSL_TIMESTAMP_WINDOW 0x80000000
@@ -306,7 +312,7 @@ typedef void (*kgsl_event_func)(struct kgsl_device *, struct kgsl_event_group *,
  * @priv: Private data passed to the callback function
  * @node: List node for the kgsl_event_group list
  * @created: Jiffies when the event was created
- * @work: Work struct for dispatching the callback
+ * @work: kthread_work struct for dispatching the callback
  * @result: KGSL event result type to pass to the callback
  * group: The event group this event belongs to
  */
@@ -318,7 +324,7 @@ struct kgsl_event {
 	void *priv;
 	struct list_head node;
 	unsigned int created;
-	struct work_struct work;
+	struct kthread_work work;
 	int result;
 	struct kgsl_event_group *group;
 };
@@ -466,6 +472,9 @@ int kgsl_resume_driver(struct platform_device *pdev);
 struct kgsl_mem_entry *gpumem_alloc_entry(struct kgsl_device_private *dev_priv,
 				uint64_t size, uint64_t flags);
 long gpumem_free_entry(struct kgsl_mem_entry *entry);
+
+/* Helper functions */
+unsigned long kgsl_get_align(struct kgsl_memdesc *memdesc);
 
 static inline int kgsl_gpuaddr_in_memdesc(const struct kgsl_memdesc *memdesc,
 				uint64_t gpuaddr, uint64_t size)

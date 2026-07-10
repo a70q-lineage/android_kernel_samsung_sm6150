@@ -16,7 +16,7 @@
 #include <linux/sort.h>
 
 #include "include/apparmor.h"
-#include "include/context.h"
+#include "include/cred.h"
 #include "include/label.h"
 #include "include/policy.h"
 #include "include/secid.h"
@@ -1431,7 +1431,7 @@ bool aa_update_label_name(struct aa_ns *ns, struct aa_label *label, gfp_t gfp)
 	if (label->hname || labels_ns(label) != ns)
 		return res;
 
-	if (aa_label_acntsxprint(&name, ns, label, FLAGS_NONE, gfp) == -1)
+	if (aa_label_acntsxprint(&name, ns, label, FLAGS_NONE, gfp) < 0)
 		return res;
 
 	ls = labels_set(label);
@@ -1681,7 +1681,7 @@ int aa_label_asxprint(char **strp, struct aa_ns *ns, struct aa_label *label,
 
 /**
  * aa_label_acntsxprint - allocate a __counted string buffer and print label
- * @strp: buffer to write to. (MAY BE NULL if @size == 0)
+ * @strp: buffer to write to.
  * @ns: namespace profile is being viewed from
  * @label: label to view (NOT NULL)
  * @flags: flags controlling what label info is printed
@@ -1722,7 +1722,7 @@ void aa_label_xaudit(struct audit_buffer *ab, struct aa_ns *ns,
 	if (!use_label_hname(ns, label, flags) ||
 	    display_mode(ns, label, flags)) {
 		len  = aa_label_asxprint(&name, ns, label, flags, gfp);
-		if (len == -1) {
+		if (len < 0) {
 			AA_DEBUG("label print error");
 			return;
 		}
@@ -1750,7 +1750,7 @@ void aa_label_seq_xprint(struct seq_file *f, struct aa_ns *ns,
 		int len;
 
 		len = aa_label_asxprint(&str, ns, label, flags, gfp);
-		if (len == -1) {
+		if (len < 0) {
 			AA_DEBUG("label print error");
 			return;
 		}
@@ -1773,7 +1773,7 @@ void aa_label_xprintk(struct aa_ns *ns, struct aa_label *label, int flags,
 		int len;
 
 		len = aa_label_asxprint(&str, ns, label, flags, gfp);
-		if (len == -1) {
+		if (len < 0) {
 			AA_DEBUG("label print error");
 			return;
 		}
@@ -1810,14 +1810,17 @@ void aa_label_printk(struct aa_label *label, gfp_t gfp)
 	aa_put_ns(ns);
 }
 
-static int label_count_str_entries(const char *str)
+static int label_count_strn_entries(const char *str, size_t n)
 {
+	const char *end = str + n;
 	const char *split;
 	int count = 1;
 
 	AA_BUG(!str);
 
-	for (split = strstr(str, "//&"); split; split = strstr(str, "//&")) {
+	for (split = aa_label_strn_split(str, end - str);
+	     split;
+	     split = aa_label_strn_split(str, end - str)) {
 		count++;
 		str = split + 3;
 	}
@@ -1845,9 +1848,10 @@ static struct aa_profile *fqlookupn_profile(struct aa_label *base,
 }
 
 /**
- * aa_label_parse - parse, validate and convert a text string to a label
+ * aa_label_strn_parse - parse, validate and convert a text string to a label
  * @base: base label to use for lookups (NOT NULL)
  * @str: null terminated text string (NOT NULL)
+ * @n: length of str to parse, will stop at \0 if encountered before n
  * @gfp: allocation type
  * @create: true if should create compound labels if they don't exist
  * @force_stack: true if should stack even if no leading &
@@ -1855,19 +1859,24 @@ static struct aa_profile *fqlookupn_profile(struct aa_label *base,
  * Returns: the matching refcounted label if present
  *     else ERRPTR
  */
-struct aa_label *aa_label_parse(struct aa_label *base, const char *str,
-				gfp_t gfp, bool create, bool force_stack)
+struct aa_label *aa_label_strn_parse(struct aa_label *base, const char *str,
+				     size_t n, gfp_t gfp, bool create,
+				     bool force_stack)
 {
 	DEFINE_VEC(profile, vec);
 	struct aa_label *label, *currbase = base;
 	int i, len, stack = 0, error;
-	char *split;
+	const char *end = str + n;
+	const char *split;
 
 	AA_BUG(!base);
 	AA_BUG(!str);
 
-	str = skip_spaces(str);
-	len = label_count_str_entries(str);
+	str = skipn_spaces(str, n);
+	if (str == NULL || (*str == '=' && base != &root_ns->unconfined->label))
+		return ERR_PTR(-EINVAL);
+
+	len = label_count_strn_entries(str, end - str);
 	if (*str == '&' || force_stack) {
 		/* stack on top of base */
 		stack = base->size;
@@ -1875,8 +1884,6 @@ struct aa_label *aa_label_parse(struct aa_label *base, const char *str,
 		if (*str == '&')
 			str++;
 	}
-	if (*str == '=')
-		base = &root_ns->unconfined->label;
 
 	error = vec_setup(profile, vec, len, gfp);
 	if (error)
@@ -1885,7 +1892,8 @@ struct aa_label *aa_label_parse(struct aa_label *base, const char *str,
 	for (i = 0; i < stack; i++)
 		vec[i] = aa_get_profile(base->vec[i]);
 
-	for (split = strstr(str, "//&"), i = stack; split && i < len; i++) {
+	for (split = aa_label_strn_split(str, end - str), i = stack;
+	     split && i < len; i++) {
 		vec[i] = fqlookupn_profile(base, currbase, str, split - str);
 		if (!vec[i])
 			goto fail;
@@ -1896,11 +1904,11 @@ struct aa_label *aa_label_parse(struct aa_label *base, const char *str,
 		if (vec[i]->ns != labels_ns(currbase))
 			currbase = &vec[i]->label;
 		str = split + 3;
-		split = strstr(str, "//&");
+		split = aa_label_strn_split(str, end - str);
 	}
 	/* last element doesn't have a split */
 	if (i < len) {
-		vec[i] = fqlookupn_profile(base, currbase, str, strlen(str));
+		vec[i] = fqlookupn_profile(base, currbase, str, end - str);
 		if (!vec[i])
 			goto fail;
 	}
@@ -1932,6 +1940,12 @@ fail:
 	goto out;
 }
 
+struct aa_label *aa_label_parse(struct aa_label *base, const char *str,
+				gfp_t gfp, bool create, bool force_stack)
+{
+	return aa_label_strn_parse(base, str, strlen(str), gfp, create,
+				   force_stack);
+}
 
 /**
  * aa_labelset_destroy - remove all labels from the label set

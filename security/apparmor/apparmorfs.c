@@ -15,7 +15,7 @@
 #include <linux/ctype.h>
 #include <linux/security.h>
 #include <linux/vmalloc.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/mount.h>
@@ -30,10 +30,9 @@
 #include "include/apparmor.h"
 #include "include/apparmorfs.h"
 #include "include/audit.h"
-#include "include/context.h"
+#include "include/cred.h"
 #include "include/crypto.h"
 #include "include/ipc.h"
-#include "include/policy_ns.h"
 #include "include/label.h"
 #include "include/policy.h"
 #include "include/policy_ns.h"
@@ -874,8 +873,10 @@ static struct multi_transaction *multi_transaction_new(struct file *file,
 	if (!t)
 		return ERR_PTR(-ENOMEM);
 	kref_init(&t->count);
-	if (copy_from_user(t->data, buf, size))
+	if (copy_from_user(t->data, buf, size)) {
+		put_multi_transaction(t);
 		return ERR_PTR(-EFAULT);
+	}
 
 	return t;
 }
@@ -1525,6 +1526,10 @@ int __aafs_profile_mkdir(struct aa_profile *profile, struct dentry *parent)
 		struct aa_profile *p;
 		p = aa_deref_parent(profile);
 		dent = prof_dir(p);
+		if (!dent) {
+			error = -ENOENT;
+			goto fail2;
+		}
 		/* adding to parent that previously didn't have children */
 		dent = aafs_create_dir("profiles", dent);
 		if (IS_ERR(dent))
@@ -1899,9 +1904,6 @@ fail2:
 
 	return error;
 }
-
-
-#define list_entry_is_head(pos, head, member) (&pos->member == (head))
 
 /**
  * __next_ns - find the next namespace to list

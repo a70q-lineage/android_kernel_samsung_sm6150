@@ -26,7 +26,7 @@ lib-y := $(filter-out $(obj-y), $(sort $(lib-y) $(lib-m)))
 
 # Handle objects in subdirs
 # ---------------------------------------------------------------------------
-# o if we encounter foo/ in $(obj-y), replace it by foo/built-in.o
+# o if we encounter foo/ in $(obj-y), replace it by foo/built-in.a
 #   and add the directory to the list of dirs to descend into: $(subdir-y)
 # o if we encounter foo/ in $(obj-m), remove it from $(obj-m)
 #   and add the directory to the list of dirs to descend into: $(subdir-m)
@@ -40,7 +40,7 @@ __subdir-y	:= $(patsubst %/,%,$(filter %/, $(obj-y)))
 subdir-y	+= $(__subdir-y)
 __subdir-m	:= $(patsubst %/,%,$(filter %/, $(obj-m)))
 subdir-m	+= $(__subdir-m)
-obj-y		:= $(patsubst %/, %/built-in.o, $(obj-y))
+obj-y		:= $(patsubst %/, %/built-in.a, $(obj-y))
 obj-m		:= $(filter-out %/, $(obj-m))
 
 # Subdirectories we need to descend into
@@ -61,7 +61,7 @@ multi-objs   := $(multi-objs-y) $(multi-objs-m)
 
 # $(subdir-obj-y) is the list of objects in $(obj-y) which uses dir/ to
 # tell kbuild to descend
-subdir-obj-y := $(filter %/built-in.o, $(obj-y))
+subdir-obj-y := $(filter %/built-in.a, $(obj-y))
 
 # $(obj-dirs) is a list of directories that contain object files
 obj-dirs := $(dir $(multi-objs) $(obj-y))
@@ -275,7 +275,17 @@ DTC_FLAGS += -q
 
 # Disable noisy checks by default
 ifeq ($(KBUILD_ENABLE_EXTRA_GCC_CHECKS),)
-DTC_FLAGS += -Wno-unit_address_vs_reg
+DTC_FLAGS += -Wno-unit_address_vs_reg \
+	-Wno-simple_bus_reg \
+	-Wno-unit_address_format \
+	-Wno-pci_bridge \
+	-Wno-pci_device_bus_num \
+	-Wno-pci_device_reg
+endif
+
+ifeq ($(KBUILD_ENABLE_EXTRA_GCC_CHECKS),2)
+DTC_FLAGS += -Wnode_name_chars_strict \
+	-Wproperty_name_chars_strict
 endif
 
 ifeq ($(KBUILD_ENABLE_EXTRA_GCC_CHECKS),2)

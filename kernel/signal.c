@@ -44,6 +44,7 @@
 #include <linux/posix-timers.h>
 #include <linux/oom.h>
 #include <linux/capability.h>
+#include <linux/cgroup.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -155,9 +156,10 @@ static inline int has_pending_signals(sigset_t *signal, sigset_t *blocked)
 
 static int recalc_sigpending_tsk(struct task_struct *t)
 {
-	if ((t->jobctl & JOBCTL_PENDING_MASK) ||
+	if ((t->jobctl & (JOBCTL_PENDING_MASK | JOBCTL_TRAP_FREEZE)) ||
 	    PENDING(&t->pending, &t->blocked) ||
-	    PENDING(&t->signal->shared_pending, &t->blocked)) {
+	    PENDING(&t->signal->shared_pending, &t->blocked) ||
+	    cgroup_task_frozen(t)) {
 		set_tsk_thread_flag(t, TIF_SIGPENDING);
 		return 1;
 	}
@@ -827,7 +829,7 @@ static int check_kill_permission(int sig, struct siginfo *info,
 		}
 	}
 
-	return security_task_kill(t, info, sig, 0);
+	return security_task_kill(t, info, sig, NULL);
 }
 
 /**
@@ -1361,7 +1363,8 @@ struct sighand_struct *__lock_task_sighand(struct task_struct *tsk,
 /*
  * send signal info to all the members of a group
  */
-int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
+int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
+			enum pid_type type)
 {
 	int ret;
 
@@ -1391,7 +1394,7 @@ int __kill_pgrp_info(int sig, struct siginfo *info, struct pid *pgrp)
 	success = 0;
 	retval = -ESRCH;
 	do_each_pid_task(pgrp, PIDTYPE_PGID, p) {
-		int err = group_send_sig_info(sig, info, p);
+		int err = group_send_sig_info(sig, info, p, PIDTYPE_PGID);
 		success |= !err;
 		retval = err;
 	} while_each_pid_task(pgrp, PIDTYPE_PGID, p);
@@ -1407,7 +1410,7 @@ int kill_pid_info(int sig, struct siginfo *info, struct pid *pid)
 		rcu_read_lock();
 		p = pid_task(pid, PIDTYPE_PID);
 		if (p)
-			error = group_send_sig_info(sig, info, p);
+			error = group_send_sig_info(sig, info, p, PIDTYPE_TGID);
 		rcu_read_unlock();
 		if (likely(!p || error != -ESRCH))
 			return error;
@@ -1441,7 +1444,7 @@ static int kill_as_cred_perm(const struct cred *cred,
 
 /* like kill_pid_info(), but doesn't use uid/euid of "current" */
 int kill_pid_info_as_cred(int sig, struct siginfo *info, struct pid *pid,
-			 const struct cred *cred, u32 secid)
+			 const struct cred *cred)
 {
 	int ret = -EINVAL;
 	struct task_struct *p;
@@ -1460,7 +1463,7 @@ int kill_pid_info_as_cred(int sig, struct siginfo *info, struct pid *pid,
 		ret = -EPERM;
 		goto out_unlock;
 	}
-	ret = security_task_kill(p, info, sig, secid);
+	ret = security_task_kill(p, info, sig, cred);
 	if (ret)
 		goto out_unlock;
 
@@ -1510,7 +1513,8 @@ static int kill_something_info(int sig, struct siginfo *info, pid_t pid)
 		for_each_process(p) {
 			if (task_pid_vnr(p) > 1 &&
 					!same_thread_group(p, current)) {
-				int err = group_send_sig_info(sig, info, p);
+				int err = group_send_sig_info(sig, info, p,
+							      PIDTYPE_MAX);
 				++count;
 				if (err != -EPERM)
 					retval = err;
@@ -1612,10 +1616,11 @@ struct sigqueue *sigqueue_alloc(void)
 
 void sigqueue_free(struct sigqueue *q)
 {
-	unsigned long flags;
 	spinlock_t *lock = &current->sighand->siglock;
+	unsigned long flags;
 
-	BUG_ON(!(q->flags & SIGQUEUE_PREALLOC));
+	if (WARN_ON_ONCE(!(q->flags & SIGQUEUE_PREALLOC)))
+		return;
 	/*
 	 * We must hold ->siglock while testing q->list
 	 * to serialize with collect_signal() or with
@@ -1642,7 +1647,10 @@ int send_sigqueue(struct sigqueue *q, struct task_struct *t, int group)
 	unsigned long flags;
 	int ret, result;
 
-	BUG_ON(!(q->flags & SIGQUEUE_PREALLOC));
+	if (WARN_ON_ONCE(!(q->flags & SIGQUEUE_PREALLOC)))
+		return 0;
+	if (WARN_ON_ONCE(q->info.si_code != SI_TIMER))
+		return 0;
 
 	ret = -1;
 	if (!likely(lock_task_sighand(t, &flags)))
@@ -1659,7 +1667,6 @@ int send_sigqueue(struct sigqueue *q, struct task_struct *t, int group)
 		 * If an SI_TIMER entry is already queue just increment
 		 * the overrun count.
 		 */
-		BUG_ON(q->info.si_code != SI_TIMER);
 		q->info.si_overrun++;
 		result = TRACE_SIGNAL_ALREADY_PENDING;
 		goto out;
@@ -1702,12 +1709,12 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 	bool autoreap = false;
 	u64 utime, stime;
 
-	BUG_ON(sig == -1);
+	WARN_ON_ONCE(sig == -1);
 
- 	/* do_notify_parent_cldstop should have been called instead.  */
- 	BUG_ON(task_is_stopped_or_traced(tsk));
+	/* do_notify_parent_cldstop should have been called instead.  */
+	WARN_ON_ONCE(task_is_stopped_or_traced(tsk));
 
-	BUG_ON(!tsk->ptrace &&
+	WARN_ON_ONCE(!tsk->ptrace &&
 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
 
 	/* Wake up all pidfd waiters */
@@ -1882,16 +1889,6 @@ static inline int may_ptrace_stop(void)
 }
 
 /*
- * Return non-zero if there is a SIGKILL that should be waking us up.
- * Called with the siglock held.
- */
-static int sigkill_pending(struct task_struct *tsk)
-{
-	return	sigismember(&tsk->pending.signal, SIGKILL) ||
-		sigismember(&tsk->signal->shared_pending.signal, SIGKILL);
-}
-
-/*
  * This must be called with current->sighand->siglock held.
  *
  * This should be the path for all ptrace stops.
@@ -1916,17 +1913,16 @@ static void ptrace_stop(int exit_code, int why, int clear_code, siginfo_t *info)
 		 * calling arch_ptrace_stop, so we must release it now.
 		 * To preserve proper semantics, we must do this before
 		 * any signal bookkeeping like checking group_stop_count.
-		 * Meanwhile, a SIGKILL could come in before we retake the
-		 * siglock.  That must prevent us from sleeping in TASK_TRACED.
-		 * So after regaining the lock, we must check for SIGKILL.
 		 */
 		spin_unlock_irq(&current->sighand->siglock);
 		arch_ptrace_stop(exit_code, info);
 		spin_lock_irq(&current->sighand->siglock);
-		if (sigkill_pending(current))
-			return;
 	}
 
+	/*
+	 * schedule() will not sleep if there is a pending signal that
+	 * can awaken the task.
+	 */
 	set_special_state(TASK_TRACED);
 
 	/*
@@ -1996,6 +1992,7 @@ static void ptrace_stop(int exit_code, int why, int clear_code, siginfo_t *info)
 		preempt_disable();
 		read_unlock(&tasklist_lock);
 		preempt_enable_no_resched();
+		cgroup_enter_frozen();
 		freezable_schedule();
 	} else {
 		/*
@@ -2174,6 +2171,7 @@ static bool do_signal_stop(int signr)
 		}
 
 		/* Now we don't run again until woken by SIGCONT or SIGKILL */
+		cgroup_enter_frozen();
 		freezable_schedule();
 		return true;
 	} else {
@@ -2218,6 +2216,43 @@ static void do_jobctl_trap(void)
 		ptrace_stop(signr, CLD_STOPPED, 0, NULL);
 		current->exit_code = 0;
 	}
+}
+
+/**
+ * do_freezer_trap - handle the freezer jobctl trap
+ *
+ * Puts the task into frozen state, if only the task is not about to quit.
+ * In this case it drops JOBCTL_TRAP_FREEZE.
+ *
+ * CONTEXT:
+ * Must be called with @current->sighand->siglock held,
+ * which is always released before returning.
+ */
+static void do_freezer_trap(void)
+	__releases(&current->sighand->siglock)
+{
+	/*
+	 * If there are other trap bits pending except JOBCTL_TRAP_FREEZE,
+	 * let's make another loop to give it a chance to be handled.
+	 * In any case, we'll return back.
+	 */
+	if ((current->jobctl & (JOBCTL_PENDING_MASK | JOBCTL_TRAP_FREEZE)) !=
+	     JOBCTL_TRAP_FREEZE) {
+		spin_unlock_irq(&current->sighand->siglock);
+		return;
+	}
+
+	/*
+	 * Now we're sure that there is no pending fatal signal and no
+	 * pending traps. Clear TIF_SIGPENDING to not get out of schedule()
+	 * immediately (if there is a non-fatal signal pending), and
+	 * put the task into sleep.
+	 */
+	__set_current_state(TASK_INTERRUPTIBLE);
+	clear_thread_flag(TIF_SIGPENDING);
+	spin_unlock_irq(&current->sighand->siglock);
+	cgroup_enter_frozen();
+	freezable_schedule();
 }
 
 static int ptrace_signal(int signr, siginfo_t *info)
@@ -2331,6 +2366,10 @@ relock:
 		trace_signal_deliver(SIGKILL, SEND_SIG_NOINFO,
 				&sighand->action[SIGKILL - 1]);
 		recalc_sigpending();
+		current->jobctl &= ~JOBCTL_TRAP_FREEZE;
+		spin_unlock_irq(&sighand->siglock);
+		if (unlikely(cgroup_task_frozen(current)))
+			cgroup_leave_frozen(true);
 		goto fatal;
 	}
 
@@ -2341,9 +2380,24 @@ relock:
 		    do_signal_stop(0))
 			goto relock;
 
-		if (unlikely(current->jobctl & JOBCTL_TRAP_MASK)) {
-			do_jobctl_trap();
+		if (unlikely(current->jobctl &
+			     (JOBCTL_TRAP_MASK | JOBCTL_TRAP_FREEZE))) {
+			if (current->jobctl & JOBCTL_TRAP_MASK) {
+				do_jobctl_trap();
+				spin_unlock_irq(&sighand->siglock);
+			} else if (current->jobctl & JOBCTL_TRAP_FREEZE)
+				do_freezer_trap();
+
+			goto relock;
+		}
+
+		/*
+		 * If the task is leaving the frozen state, let's update
+		 * cgroup counters and reset the frozen bit.
+		 */
+		if (unlikely(cgroup_task_frozen(current))) {
 			spin_unlock_irq(&sighand->siglock);
+			cgroup_leave_frozen(true);
 			goto relock;
 		}
 
@@ -2437,8 +2491,8 @@ relock:
 			continue;
 		}
 
-	fatal:
 		spin_unlock_irq(&sighand->siglock);
+	fatal:
 
 		/*
 		 * Anything else is fatal, maybe with a core dump.

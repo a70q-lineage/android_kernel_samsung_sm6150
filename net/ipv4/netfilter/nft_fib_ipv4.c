@@ -95,6 +95,9 @@ void nft_fib4_eval(const struct nft_expr *expr, struct nft_regs *regs,
 	else
 		oif = NULL;
 
+	if (priv->flags & NFTA_FIB_F_IIF)
+		fl4.flowi4_oif = l3mdev_master_ifindex_rcu(oif);
+
 	if (nft_hook(pkt) == NF_INET_PRE_ROUTING &&
 	    nft_fib_is_loopback(pkt->skb, nft_in(pkt))) {
 		nft_fib_store_result(dest, priv, pkt,
@@ -153,8 +156,8 @@ void nft_fib4_eval(const struct nft_expr *expr, struct nft_regs *regs,
 	for (i = 0; i < res.fi->fib_nhs; i++) {
 		struct fib_nh *nh = &res.fi->fib_nh[i];
 
-		if (nh->nh_dev == oif) {
-			found = nh->nh_dev;
+		if (nh->fib_nh_dev == oif) {
+			found = nh->fib_nh_dev;
 			goto ok;
 		}
 	}

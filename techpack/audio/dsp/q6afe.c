@@ -1,14 +1,7 @@
-/* Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+/* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: GPL-2.0-only
+*/
 #include <linux/slab.h>
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
@@ -393,6 +386,11 @@ static int32_t sp_make_afe_callback(uint32_t opcode, uint32_t *payload,
 			return -EINVAL;
 		}
 		expected_size += sizeof(struct param_hdr_v3);
+		if (payload_size < expected_size) {
+			pr_err("%s: Error: size %d is less than expected\n",
+				__func__, payload_size);
+			return -EINVAL;
+		}
 		memcpy(&param_hdr, &payload[1], sizeof(struct param_hdr_v3));
 		data_start = &payload[5];
 		break;
@@ -404,24 +402,49 @@ static int32_t sp_make_afe_callback(uint32_t opcode, uint32_t *payload,
 	switch (param_hdr.param_id) {
 	case AFE_PARAM_ID_CALIB_RES_CFG_V2:
 		expected_size += sizeof(struct asm_calib_res_cfg);
+		if (param_hdr.param_size != sizeof(struct asm_calib_res_cfg)) {
+			pr_err("%s: Error: param_size %d is greater than expected\n",
+				__func__,param_hdr.param_size);
+			return -EINVAL;
+		}
 		data_dest = (u32 *) &this_afe.calib_data;
 		break;
 	case AFE_PARAM_ID_SP_V2_TH_VI_FTM_PARAMS:
 		expected_size += sizeof(struct afe_sp_th_vi_ftm_params);
+		if (param_hdr.param_size != sizeof(struct afe_sp_th_vi_ftm_params)) {
+			pr_err("%s: Error: param_size %d is greater than expected\n",
+				__func__,param_hdr.param_size);
+			return -EINVAL;
+		}
 		data_dest = (u32 *) &this_afe.th_vi_resp;
 		break;
 	case AFE_PARAM_ID_SP_V2_TH_VI_V_VALI_PARAMS:
 		pr_err("%s: got response pkt\n", __func__);
 		expected_size += sizeof(struct afe_sp_th_vi_v_vali_params);
+		if (param_hdr.param_size != sizeof(struct afe_sp_th_vi_v_vali_params)) {
+			pr_err("%s: Error: param_size %d is greater than expected\n",
+				__func__,param_hdr.param_size);
+			return -EINVAL;
+		}
 		data_dest = (u32 *) &this_afe.th_vi_v_vali_resp;
 		break;
 	case AFE_PARAM_ID_SP_V2_EX_VI_FTM_PARAMS:
 		expected_size += sizeof(struct afe_sp_ex_vi_ftm_params);
+		if (param_hdr.param_size != sizeof(struct afe_sp_ex_vi_ftm_params)) {
+			pr_err("%s: Error: param_size %d is greater than expected\n",
+				__func__,param_hdr.param_size);
+			return -EINVAL;
+		}
 		data_dest = (u32 *) &this_afe.ex_vi_resp;
 		break;
 	case AFE_PARAM_ID_SP_RX_TMAX_XMAX_LOGGING:
 		expected_size += sizeof(
 				struct afe_sp_rx_tmax_xmax_logging_param);
+		if (param_hdr.param_size != sizeof(struct afe_sp_rx_tmax_xmax_logging_param)) {
+			pr_err("%s: Error: param_size %d is greater than expected\n",
+				__func__,param_hdr.param_size);
+			return -EINVAL;
+		}
 		data_dest = (u32 *) &this_afe.xt_logging_resp;
 		break;
 	default:
@@ -1005,6 +1028,7 @@ EXPORT_SYMBOL(afe_q6_interface_prepare);
 static int afe_apr_send_pkt(void *data, wait_queue_head_t *wait)
 {
 	int ret;
+
 	mutex_lock(&this_afe.afe_apr_lock);
 	if (wait)
 		atomic_set(&this_afe.state, 1);
@@ -1016,7 +1040,8 @@ static int afe_apr_send_pkt(void *data, wait_queue_head_t *wait)
 					(atomic_read(&this_afe.state) == 0),
 					msecs_to_jiffies(2 * TIMEOUT_MS));
 			if (!ret) {
-				pr_err_ratelimited("%s: request timedout\n",__func__);
+				pr_err_ratelimited("%s: request timedout\n",
+					__func__);
 				ret = -ETIMEDOUT;
 			} else if (atomic_read(&this_afe.status) > 0) {
 				pr_err("%s: DSP returned error[%s]\n", __func__,
@@ -6540,18 +6565,20 @@ int afe_rt_proxy_port_write(phys_addr_t buf_addr_p,
 	afecmd_wr.reserved = 0;
 
 	/*
-	* Do not call afe_apr_send_pkt() here as it acquires
-	* a mutex lock inside and this function gets called in
-	* interrupt context leading to scheduler crash
-	*/
+	 * Do not call afe_apr_send_pkt() here as it acquires
+	 * a mutex lock inside and this function gets called in
+	 * interrupt context leading to scheduler crash
+	 */
 	atomic_set(&this_afe.status, 0);
 	ret = apr_send_pkt(this_afe.apr, (uint32_t *) &afecmd_wr);
 	if (ret < 0) {
 		pr_err("%s: AFE rtproxy write to port 0x%x failed %d\n",
-		__func__, afecmd_wr.port_id, ret);
+			__func__, afecmd_wr.port_id, ret);
 		ret = -EINVAL;
 	}
+
 	return ret;
+
 }
 EXPORT_SYMBOL(afe_rt_proxy_port_write);
 
@@ -6594,15 +6621,15 @@ int afe_rt_proxy_port_read(phys_addr_t buf_addr_p,
 	afecmd_rd.mem_map_handle = mem_map_handle;
 
 	/*
-	* Do not call afe_apr_send_pkt() here as it acquires
-	* a mutex lock inside and this function gets called in
-	* interrupt context leading to scheduler crash
-	*/
+	 * Do not call afe_apr_send_pkt() here as it acquires
+	 * a mutex lock inside and this function gets called in
+	 * interrupt context leading to scheduler crash
+	 */
 	atomic_set(&this_afe.status, 0);
 	ret = apr_send_pkt(this_afe.apr, (uint32_t *) &afecmd_rd);
 	if (ret < 0) {
-		pr_err("%s: AFE rtproxy read cmd to port 0x%x failed %d\n",
-		__func__, afecmd_rd.port_id, ret);
+		pr_err("%s: AFE rtproxy read  cmd to port 0x%x failed %d\n",
+			__func__, afecmd_rd.port_id, ret);
 		ret = -EINVAL;
 	}
 
@@ -6924,6 +6951,14 @@ static int afe_sidetone_iir(u16 tx_port_id)
 		pr_debug("%s: adding 2 to size:%d\n", __func__, size);
 		size = size + 2;
 	}
+
+	if (size > MAX_SIDETONE_IIR_DATA_SIZE) {
+		pr_err("%s: iir_config size is out of bounds:%d\n", __func__, size);
+		mutex_unlock(&this_afe.cal_data[cal_index]->lock);
+		ret = -EINVAL;
+		goto done;
+	}
+
 	memcpy(&filter_data.iir_config, &st_iir_cal_info->iir_config, size);
 	mutex_unlock(&this_afe.cal_data[cal_index]->lock);
 
@@ -8130,6 +8165,7 @@ int afe_spk_prot_get_calib_data(struct afe_spkr_prot_get_vi_calib *calib_resp)
 	struct param_hdr_v3 param_hdr;
 	int port = SLIMBUS_4_TX;
 	int ret = -EINVAL;
+	uint32_t th_vi_ca_state;
 
 	if (!calib_resp) {
 		pr_err("%s: Invalid params\n", __func__);
@@ -8149,6 +8185,12 @@ int afe_spk_prot_get_calib_data(struct afe_spkr_prot_get_vi_calib *calib_resp)
 	if (ret < 0) {
 		pr_err("%s: get param port 0x%x param id[0x%x]failed %d\n",
 		       __func__, port, param_hdr.param_id, ret);
+		goto get_params_fail;
+	}
+	th_vi_ca_state = this_afe.calib_data.res_cfg.th_vi_ca_state;
+	if (th_vi_ca_state < FBSP_INCORRECT_OP_MODE ||
+		th_vi_ca_state > MAX_FBSP_STATE) {
+		pr_err("%s: invalid fbsp state %d\n", __func__, th_vi_ca_state);
 		goto get_params_fail;
 	}
 	memcpy(&calib_resp->res_cfg, &this_afe.calib_data.res_cfg,
@@ -8493,6 +8535,9 @@ static int afe_set_cal_sp_th_vi_cfg(int32_t cal_type, size_t data_size,
 
 	if (cal_data == NULL ||
 	    data_size > sizeof(*cal_data) ||
+	    (data_size < sizeof(cal_data->cal_hdr) +
+		sizeof(cal_data->cal_data) +
+		sizeof(cal_data->cal_info.mode)) ||
 	    this_afe.cal_data[AFE_FB_SPKR_PROT_TH_VI_CAL] == NULL)
 		goto done;
 
@@ -8637,6 +8682,9 @@ static int afe_get_cal_sp_th_vi_param(int32_t cal_type, size_t data_size,
 
 	if (cal_data == NULL ||
 	    data_size > sizeof(*cal_data) ||
+	    (data_size < sizeof(cal_data->cal_hdr) +
+		sizeof(cal_data->cal_data) +
+		sizeof(cal_data->cal_info.mode)) ||
 	    this_afe.cal_data[AFE_FB_SPKR_PROT_TH_VI_CAL] == NULL)
 		return 0;
 
@@ -9229,6 +9277,7 @@ int afe_unvote_lpass_core_hw(uint32_t hw_block_id, uint32_t client_handle)
 		ret = -EINVAL;
 		goto done;
 	}
+
 	ret = afe_apr_send_pkt((uint32_t *) cmd_ptr,
 			&this_afe.lpass_core_hw_wait);
 done:

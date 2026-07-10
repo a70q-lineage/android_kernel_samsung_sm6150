@@ -2220,16 +2220,16 @@ static const struct snd_soc_dapm_route tx_audio_map[] = {
 };
 
 static const struct snd_kcontrol_new tx_macro_snd_controls_common[] = {
-	SOC_SINGLE_SX_TLV("TX_DEC0 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC0 Volume",
 			  BOLERO_CDC_TX0_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC1 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC1 Volume",
 			  BOLERO_CDC_TX1_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC2 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC2 Volume",
 			  BOLERO_CDC_TX2_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC3 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC3 Volume",
 			  BOLERO_CDC_TX3_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
 
@@ -2250,16 +2250,16 @@ static const struct snd_kcontrol_new tx_macro_snd_controls_common[] = {
 };
 
 static const struct snd_kcontrol_new tx_macro_snd_controls_v3[] = {
-	SOC_SINGLE_SX_TLV("TX_DEC4 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC4 Volume",
 			  BOLERO_CDC_TX4_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC5 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC5 Volume",
 			  BOLERO_CDC_TX5_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC6 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC6 Volume",
 			  BOLERO_CDC_TX6_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC7 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC7 Volume",
 			  BOLERO_CDC_TX7_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
 
@@ -2277,28 +2277,28 @@ static const struct snd_kcontrol_new tx_macro_snd_controls_v3[] = {
 };
 
 static const struct snd_kcontrol_new tx_macro_snd_controls[] = {
-	SOC_SINGLE_SX_TLV("TX_DEC0 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC0 Volume",
 			  BOLERO_CDC_TX0_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC1 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC1 Volume",
 			  BOLERO_CDC_TX1_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC2 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC2 Volume",
 			  BOLERO_CDC_TX2_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC3 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC3 Volume",
 			  BOLERO_CDC_TX3_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC4 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC4 Volume",
 			  BOLERO_CDC_TX4_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC5 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC5 Volume",
 			  BOLERO_CDC_TX5_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC6 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC6 Volume",
 			  BOLERO_CDC_TX6_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("TX_DEC7 Volume",
+	SOC_SINGLE_S8_TLV("TX_DEC7 Volume",
 			  BOLERO_CDC_TX7_TX_VOL_CTL,
 			  0, -84, 40, digital_gain),
 

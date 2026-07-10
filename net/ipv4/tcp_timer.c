@@ -232,11 +232,6 @@ static int tcp_write_timeout(struct sock *sk)
 	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) {
 		if (icsk->icsk_retransmits) {
 			dst_negative_advice(sk);
-			if (tp->syn_fastopen || tp->syn_data)
-				tcp_fastopen_cache_set(sk, 0, NULL, true, 0);
-			if (tp->syn_data && icsk->icsk_retransmits == 1)
-				NET_INC_STATS(sock_net(sk),
-					      LINUX_MIB_TCPFASTOPENACTIVEFAIL);
 		} else if (!tp->syn_data && !tp->syn_fastopen) {
 			sk_rethink_txhash(sk);
 		}
@@ -244,17 +239,6 @@ static int tcp_write_timeout(struct sock *sk)
 		expired = icsk->icsk_retransmits >= retry_until;
 	} else {
 		if (retransmits_timed_out(sk, net->ipv4.sysctl_tcp_retries1, 0)) {
-			/* Some middle-boxes may black-hole Fast Open _after_
-			 * the handshake. Therefore we conservatively disable
-			 * Fast Open on this path on recurring timeouts after
-			 * successful Fast Open.
-			 */
-			if (tp->syn_data_acked) {
-				tcp_fastopen_cache_set(sk, 0, NULL, true, 0);
-				if (icsk->icsk_retransmits == net->ipv4.sysctl_tcp_retries1)
-					NET_INC_STATS(sock_net(sk),
-						      LINUX_MIB_TCPFASTOPENACTIVEFAIL);
-			}
 			/* Black hole detection */
 			tcp_mtu_probing(icsk, sk);
 
@@ -277,11 +261,19 @@ static int tcp_write_timeout(struct sock *sk)
 		expired = retransmits_timed_out(sk, retry_until,
 						icsk->icsk_user_timeout);
 	}
+	tcp_fastopen_active_detect_blackhole(sk, expired);
+
+	if (BPF_SOCK_OPS_TEST_FLAG(tp, BPF_SOCK_OPS_RTO_CB_FLAG))
+		tcp_call_bpf_3arg(sk, BPF_SOCK_OPS_RTO_CB,
+				  icsk->icsk_retransmits,
+				  icsk->icsk_rto, (int)expired);
+
 	if (expired) {
 		/* Has it gone just too far? */
 		tcp_write_err(sk);
 		return 1;
 	}
+
 	return 0;
 }
 
@@ -402,14 +394,13 @@ abort:		tcp_write_err(sk);
  *	Timer for Fast Open socket to retransmit SYNACK. Note that the
  *	sk here is the child socket, not the parent (listener) socket.
  */
-static void tcp_fastopen_synack_timer(struct sock *sk)
+static void tcp_fastopen_synack_timer(struct sock *sk, struct request_sock *req)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int max_retries = icsk->icsk_syn_retries ? :
 	    sock_net(sk)->ipv4.sysctl_tcp_synack_retries + 1; /* add one more retry for fastopen */
-	struct request_sock *req;
+	struct tcp_sock *tp = tcp_sk(sk);
 
-	req = tcp_sk(sk)->fastopen_rsk;
 	req->rsk_ops->syn_ack_timeout(req);
 
 	if (req->num_timeout >= max_retries) {
@@ -424,10 +415,33 @@ static void tcp_fastopen_synack_timer(struct sock *sk)
 	inet_rtx_syn_ack(sk, req);
 	req->num_timeout++;
 	icsk->icsk_retransmits++;
+	if (!tp->retrans_stamp)
+		tp->retrans_stamp = tcp_time_stamp(tp);
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
 			  TCP_TIMEOUT_INIT << req->num_timeout, TCP_RTO_MAX);
 }
 
+static bool tcp_rtx_probe0_timed_out(const struct sock *sk,
+				     const struct sk_buff *skb)
+{
+	const struct tcp_sock *tp = tcp_sk(sk);
+	const int timeout = TCP_RTO_MAX * 2;
+	u32 rtx_delta;
+	s32 rcv_delta;
+
+	/* Note: timer interrupt might have been delayed by at least one jiffy,
+	 * and tp->rcv_tstamp might very well have been written recently.
+	 * rcv_delta can thus be negative.
+	 */
+	rcv_delta = inet_csk(sk)->icsk_timeout - tp->rcv_tstamp;
+	if (rcv_delta <= timeout)
+		return false;
+
+	rtx_delta = (u32)msecs_to_jiffies(tcp_time_stamp(tp) -
+			(tp->retrans_stamp ?: tcp_skb_timestamp(skb)));
+
+	return rtx_delta > timeout;
+}
 
 /**
  *  tcp_retransmit_timer() - The TCP retransmit timeout handler
@@ -445,12 +459,15 @@ void tcp_retransmit_timer(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct net *net = sock_net(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct request_sock *req;
 	struct sk_buff *skb;
 
-	if (tp->fastopen_rsk) {
+	req = rcu_dereference_protected(tp->fastopen_rsk,
+					lockdep_sock_is_held(sk));
+	if (req) {
 		WARN_ON_ONCE(sk->sk_state != TCP_SYN_RECV &&
 			     sk->sk_state != TCP_FIN_WAIT1);
-		tcp_fastopen_synack_timer(sk);
+		tcp_fastopen_synack_timer(sk, req);
 		/* Before we receive ACK to our SYN-ACK don't retransmit
 		 * anything else (e.g., data or FIN segments).
 		 */
@@ -463,8 +480,6 @@ void tcp_retransmit_timer(struct sock *sk)
 	skb = tcp_rtx_queue_head(sk);
 	if (WARN_ON_ONCE(!skb))
 		return;
-
-	tp->tlp_high_seq = 0;
 
 	if (!tp->snd_wnd && !sock_flag(sk, SOCK_DEAD) &&
 	    !((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV))) {
@@ -490,7 +505,7 @@ void tcp_retransmit_timer(struct sock *sk)
 					    tp->snd_una, tp->snd_nxt);
 		}
 #endif
-		if (tcp_jiffies32 - tp->rcv_tstamp > TCP_RTO_MAX) {
+		if (tcp_rtx_probe0_timed_out(sk, skb)) {
 			tcp_write_err(sk);
 			goto out;
 		}
@@ -572,7 +587,9 @@ out_reset_timer:
 	    tcp_stream_is_thin(tp) &&
 	    icsk->icsk_retransmits <= TCP_THIN_LINEAR_RETRIES) {
 		icsk->icsk_backoff = 0;
-		icsk->icsk_rto = min(__tcp_set_rto(tp), TCP_RTO_MAX);
+		icsk->icsk_rto = clamp(__tcp_set_rto(tp),
+				       tcp_rto_min(sk),
+				       TCP_RTO_MAX);
 	} else {
 		/* Use normal (exponential) backoff */
 		icsk->icsk_rto = min(icsk->icsk_rto << 1, TCP_RTO_MAX);

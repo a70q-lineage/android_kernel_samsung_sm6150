@@ -53,8 +53,7 @@ static LIST_HEAD(rds_tcp_conn_list);
 static struct kmem_cache *rds_tcp_conn_slab;
 
 static int rds_tcp_skbuf_handler(struct ctl_table *ctl, int write,
-				 void __user *buffer, size_t *lenp,
-				 loff_t *fpos);
+				 void *buffer, size_t *lenp, loff_t *fpos);
 
 static int rds_tcp_min_sndbuf = SOCK_MIN_SNDBUF;
 static int rds_tcp_min_rcvbuf = SOCK_MIN_RCVBUF;
@@ -162,10 +161,10 @@ void rds_tcp_reset_callbacks(struct socket *sock,
 	 */
 	atomic_set(&cp->cp_state, RDS_CONN_RESETTING);
 	wait_event(cp->cp_waitq, !test_bit(RDS_IN_XMIT, &cp->cp_flags));
-	lock_sock(osock->sk);
 	/* reset receive side state for rds_tcp_data_recv() for osock  */
 	cancel_delayed_work_sync(&cp->cp_send_w);
 	cancel_delayed_work_sync(&cp->cp_recv_w);
+	lock_sock(osock->sk);
 	if (tc->t_tinc) {
 		rds_inc_put(&tc->t_tinc->ti_inc);
 		tc->t_tinc = NULL;
@@ -392,7 +391,7 @@ void rds_tcp_tune(struct socket *sock)
 		sk->sk_userlocks |= SOCK_SNDBUF_LOCK;
 	}
 	if (rtn->rcvbuf_size > 0) {
-		sk->sk_sndbuf = rtn->rcvbuf_size;
+		sk->sk_rcvbuf = rtn->rcvbuf_size;
 		sk->sk_userlocks |= SOCK_RCVBUF_LOCK;
 	}
 	release_sock(sk);
@@ -603,8 +602,7 @@ static void rds_tcp_sysctl_reset(struct net *net)
 }
 
 static int rds_tcp_skbuf_handler(struct ctl_table *ctl, int write,
-				 void __user *buffer, size_t *lenp,
-				 loff_t *fpos)
+				 void *buffer, size_t *lenp, loff_t *fpos)
 {
 	struct net *net = current->nsproxy->net_ns;
 	int err;

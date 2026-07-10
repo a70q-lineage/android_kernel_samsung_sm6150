@@ -3200,6 +3200,9 @@ static int dsi_panel_parse_bl_config(struct dsi_panel *panel)
 	}
 #endif
 
+	panel->bl_config.bl_inverted_dbv = utils->read_bool(utils->data,
+		"qcom,mdss-dsi-bl-inverted-dbv");
+
 	if (panel->bl_config.type == DSI_BACKLIGHT_PWM) {
 		rc = dsi_panel_parse_bl_pwm_config(panel);
 		if (rc) {
@@ -3567,6 +3570,13 @@ static int dsi_panel_parse_dsc_params(struct dsi_display_mode *mode,
 		goto error;
 	}
 	priv_info->dsc.bpc = data;
+
+	rc = utils->read_u32(utils->data, "qcom,mdss-pps-delay-ms", &data);
+	if (rc) {
+		pr_debug("pps-delay-ms not specified, defaulting to 0\n");
+		priv_info->dsc.pps_delay_ms = 0;
+	}
+	priv_info->dsc.pps_delay_ms = data;
 
 	rc = utils->read_u32(utils->data, "qcom,mdss-dsc-bit-per-pixel",
 			&data);

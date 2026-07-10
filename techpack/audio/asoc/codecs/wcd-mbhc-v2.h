@@ -615,6 +615,7 @@ struct wcd_mbhc {
 	bool slow_insertion;
 #endif
 	bool usbc_force_pr_mode;
+
 	struct wcd_mbhc_fn *mbhc_fn;
 	bool force_linein;
 	int usbc_mode;
